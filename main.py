@@ -19,10 +19,11 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "troque_essa_chave_em_producao")
 # Banco de dados
 # ---------------------------
 def conectar_banco():
+    # Tenta pegar as variáveis do Railway. Se não achar, usa os valores padrão.
     host = os.getenv('DB_HOST', 'localhost')
     user = os.getenv('DB_USER', 'root')
     password = os.getenv('DB_PASSWORD', 'TLvLZjNyOkcdniOBXDpRjjQXsPuINSYv')
-    db = os.getenv('DB_NAME', 'users')
+    db = os.getenv('DB_NAME', 'users') # No Railway geralmente o banco chama 'railway', mas a variável corrige isso
 
     try:
         conn = pymysql.connect(
@@ -682,7 +683,47 @@ def api_search():
 def health():
     return 'ok'
 
+# --- ROTA PARA CRIAR O BANCO (NOVA) ---
+@app.route("/setup_banco")
+def setup_banco():
+    conexao = conectar_banco()
+    if not conexao:
+        return "Erro: Não foi possível conectar ao banco. Verifique as variáveis de ambiente no Railway."
+
+    try:
+        with conexao.cursor() as cursor:
+            # 1. Tabela Users
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                nome VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                senha VARCHAR(255) NOT NULL,
+                tema VARCHAR(50) DEFAULT 'claro',
+                resultados_por_pagina INT DEFAULT 12,
+                fez_onboarding TINYINT(1) DEFAULT 0
+            );
+            """)
+
+            # 2. Tabela Noticias
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS noticias (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                titulo TEXT,
+                link TEXT,
+                fonte VARCHAR(255),
+                sentimento VARCHAR(50),
+                termo VARCHAR(255),
+                data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """)
+
+        conexao.commit()
+        conexao.close()
+        return "✅ SUCESSO! As tabelas 'users' e 'noticias' foram criadas. Agora você pode ir para /register e se cadastrar!"
+    except Exception as e:
+        return f"Erro ao criar tabelas: {e}"
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
-
