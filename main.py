@@ -13,33 +13,39 @@ from urllib.parse import quote_plus, urlparse, unquote, parse_qs, urljoin
 
 # Flask app
 app = Flask(__name__)
-# Chave secreta para sessões (Importante para o Login funcionar)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "chave_secreta_padrao_troque_isso")
 
 # ---------------------------
-# Banco de dados (CORRIGIDO)
+# Banco de dados (CORRIGIDO PARA RAILWAY)
 # ---------------------------
 def conectar_banco():
     """
-    Conecta ao MySQL usando APENAS variáveis de ambiente do Railway.
+    Conecta ao MySQL priorizando as Variáveis de Ambiente do Railway.
     """
+    # 1. Tenta pegar as configurações do Railway (Variáveis de Ambiente)
     host = os.getenv('DB_HOST')
     user = os.getenv('DB_USER')
     password = os.getenv('DB_PASSWORD')
     db = os.getenv('DB_NAME')
-    
-    # Tenta pegar a porta, se não tiver, usa 3306
     port_str = os.getenv('DB_PORT', '3306')
+
+    # Conversão segura da porta
     try:
         port = int(port_str)
     except ValueError:
         port = 3306
 
-    # DIAGNÓSTICO: Isso vai aparecer nos logs do Railway para sabermos se as variáveis chegaram
-    print(f"🔌 Tentando conectar ao banco: Host={host}, User={user}, DB={db}, Port={port}")
+    # 2. Diagnóstico no Log (Para você ver se o Railway enviou os dados)
+    # Isso vai aparecer na aba "Deploy Logs" se der erro.
+    print(f"🔌 TENTATIVA DE CONEXÃO:")
+    print(f"   > Host: {host if host else 'NÃO ENCONTRADO (Usando localhost?)'}")
+    print(f"   > User: {user if user else 'NÃO ENCONTRADO'}")
+    print(f"   > DB:   {db if db else 'NÃO ENCONTRADO'}")
+    print(f"   > Port: {port}")
 
-    if not host or not user or not password or not db:
-        print("❌ ERRO CRÍTICO: Variáveis de ambiente faltando! Verifique a aba 'Variables' no Railway.")
+    # 3. Se as variáveis não existirem, aborta para evitar erro de localhost
+    if not host or not user or not password:
+        print("❌ ERRO CRÍTICO: As variáveis de ambiente (DB_HOST, etc) não foram definidas no Railway.")
         return None
 
     try:
@@ -63,30 +69,23 @@ def conectar_banco():
 # ---------------------------
 def limpar_link_google(url: str) -> str:
     try:
-        if not url:
-            return url
+        if not url: return url
         parsed = urlparse(url)
         qs = parse_qs(parsed.query)
-        if 'q' in qs and qs['q']:
-            return qs['q'][0]
+        if 'q' in qs and qs['q']: return qs['q'][0]
         if '/url?q=' in url:
             part = url.split('/url?q=', 1)[1]
             real = part.split('&', 1)[0]
             return unquote(real)
         return url
-    except Exception:
-        return url
+    except Exception: return url
 
 def normalize_link(link, prefer_domain=None):
-    if not link:
-        return None
+    if not link: return None
     try:
-        if "/url?q=" in link:
-            link = limpar_link_google(link)
-        if 'busca/click' in link or '/busca?' in link:
-            return None
-        if link.startswith('/') and prefer_domain:
-            link = prefer_domain.rstrip('/') + link
+        if "/url?q=" in link: link = limpar_link_google(link)
+        if 'busca/click' in link or '/busca?' in link: return None
+        if link.startswith('/') and prefer_domain: link = prefer_domain.rstrip('/') + link
         parsed = urlparse(link)
         if not parsed.scheme:
             link = 'https://' + link
@@ -95,65 +94,47 @@ def normalize_link(link, prefer_domain=None):
             if '/url' in parsed.path and 'q=' in parsed.query:
                 link = limpar_link_google(link)
                 parsed = urlparse(link)
-            else:
-                return None
+            else: return None
         clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
         return clean
-    except Exception:
-        return None
+    except Exception: return None
 
 def extract_title_from_url(link):
     try:
         parsed = urlparse(link)
         path = parsed.path or ''
-        if not path or path == '/':
-            return parsed.netloc
+        if not path or path == '/': return parsed.netloc
         segs = [s for s in path.split('/') if s]
         last = segs[-1]
         last = unquote(last)
         last = last.split('.')[0]
         title = last.replace('-', ' ').replace('_', ' ')
-        if len(title) < 3 or all(c.isdigit() for c in title):
-            return parsed.netloc
+        if len(title) < 3 or all(c.isdigit() for c in title): return parsed.netloc
         return ' '.join([w.capitalize() for w in title.split()])
-    except Exception:
-        return link
+    except Exception: return link
 
 def is_probably_article(title, link):
-    if not link:
-        return False
+    if not link: return False
     try:
         parsed = urlparse(link)
-        if not parsed.scheme or not parsed.netloc:
-            return False
-        blacklist = ['facebook.com', 'twitter.com', 't.co', 'instagram.com', 'youtube.com',
-                     'accounts.google.com', 'linkedin.com', 'bit.ly', 'tinyurl.com', 'meet.google.com']
+        if not parsed.scheme or not parsed.netloc: return False
+        blacklist = ['facebook.com', 'twitter.com', 't.co', 'instagram.com', 'youtube.com', 'accounts.google.com', 'linkedin.com', 'bit.ly', 'tinyurl.com', 'meet.google.com']
         net = parsed.netloc.lower()
-        if any(b in net for b in blacklist):
-            return False
+        if any(b in net for b in blacklist): return False
         path = (parsed.path or '').strip('/')
         if '/noticia/' in link or 'g1.globo.com' in parsed.netloc:
-            if len(path) < 3:
-                return False
-        if any(x in link for x in ['busca', 'click', '/search', 'query=']):
-            return False
-    except Exception:
-        return False
-
-    if not title:
-        return False
+            if len(path) < 3: return False
+        if any(x in link for x in ['busca', 'click', '/search', 'query=']): return False
+    except Exception: return False
+    if not title: return False
     if title.startswith('http') or '=' in title or '%' in title:
         derived = extract_title_from_url(link)
-        if not derived or len(derived) < 3:
-            return False
+        if not derived or len(derived) < 3: return False
         title = derived
-    if '.' in title and ' ' not in title:
-        return False
-    if len(title) < 6:
-        return False
+    if '.' in title and ' ' not in title: return False
+    if len(title) < 6: return False
     words = [w for w in title.split() if any(c.isalpha() for c in w)]
-    if len(words) < 2:
-        return False
+    if len(words) < 2: return False
     return True
 
 # ---------------------------
@@ -161,23 +142,17 @@ def is_probably_article(title, link):
 # ---------------------------
 def analisar_sentimento(texto: str) -> str:
     try:
-        if not texto:
-            return 'neutro'
-        try:
-            translated = GoogleTranslator(source='auto', target='en').translate(texto)
-        except Exception:
-            translated = texto
+        if not texto: return 'neutro'
+        try: translated = GoogleTranslator(source='auto', target='en').translate(texto)
+        except Exception: translated = texto
         polarity = TextBlob(translated).sentiment.polarity
-        if polarity > 0.1:
-            return 'positivo'
-        if polarity < -0.1:
-            return 'negativo'
+        if polarity > 0.1: return 'positivo'
+        if polarity < -0.1: return 'negativo'
         return 'neutro'
-    except Exception:
-        return 'neutro'
+    except Exception: return 'neutro'
 
 # ---------------------------
-# Raspagens (Versões Atualizadas)
+# Raspagens
 # ---------------------------
 def raspar_g1_requests(termo, limite=20):
     resultados = []
@@ -188,13 +163,11 @@ def raspar_g1_requests(termo, limite=20):
         resp = requests.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-
         selectors = ["a.widget--info__title", "a.feed-post-link", "a[href*='/noticia/']", "article a", "div.search-body a", "h3 a"]
         anchors = []
         for sel in selectors:
             found = soup.select(sel)
             if found: anchors.extend(found)
-        
         seen_hrefs = set()
         filtered_anchors = []
         for a in anchors:
@@ -202,7 +175,6 @@ def raspar_g1_requests(termo, limite=20):
             if not href or href in seen_hrefs: continue
             seen_hrefs.add(href)
             filtered_anchors.append(a)
-
         seen = set()
         for a in filtered_anchors:
             raw_link = a.get('href') or a.get('data-href') or ''
@@ -211,7 +183,6 @@ def raspar_g1_requests(termo, limite=20):
                 link = urljoin('https://g1.globo.com', raw_link)
                 link = normalize_link(link, prefer_domain='https://g1.globo.com')
             if not link: continue
-
             titulo = a.get_text(strip=True) or a.get('title') or ''
             if not titulo:
                 parent = a.find_parent()
@@ -219,9 +190,7 @@ def raspar_g1_requests(termo, limite=20):
                     h = parent.find(['h1', 'h2', 'h3', 'h4'])
                     if h: titulo = h.get_text(strip=True)
             if not titulo: titulo = extract_title_from_url(link)
-
             if not is_probably_article(titulo, link): continue
-
             key = (titulo[:140], link)
             if key in seen: continue
             seen.add(key)
@@ -230,7 +199,6 @@ def raspar_g1_requests(termo, limite=20):
     except Exception as e:
         print("Erro raspar_g1_requests:", e)
         traceback.print_exc()
-
     print(f"✅ G1 (requests) encontrou: {len(resultados)}")
     return resultados
 
@@ -243,14 +211,12 @@ def raspar_google_requests(termo, limite=12):
         resp = requests.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-
         blocks = soup.select("div.dbsr") or soup.select("g-card") or soup.select("div.xuvV6b") or soup.select("div.SoaBEf")
         anchors = []
         for b in blocks:
             a = b.find('a')
             if a: anchors.append(a)
         if not anchors: anchors = soup.select("a[href^='/url?q=']")
-
         seen = set()
         for a in anchors:
             raw_link = a.get('href') or ''
@@ -259,13 +225,10 @@ def raspar_google_requests(termo, limite=12):
                 link = limpar_link_google(raw_link)
                 link = normalize_link(link)
             if not link: continue
-
             title_elem = a.select_one("div.JheGif") or a.select_one("h3") or a.select_one("div.MBeuO span")
             title = title_elem.get_text(" ", strip=True) if title_elem else a.get_text(" ", strip=True)
             if not title or len(title) < 4: title = extract_title_from_url(link)
-
             if not is_probably_article(title, link): continue
-
             key = (title[:140], link)
             if key in seen: continue
             seen.add(key)
@@ -353,9 +316,6 @@ def raspar_google_noticias(termo):
         print("Fallback Selenium Google falhou:", e)
         return []
 
-# ---------------------------
-# Salvar notícias no banco
-# ---------------------------
 def salvar_no_banco(resultados, termo):
     if not resultados: return
     conexao = conectar_banco()
@@ -384,14 +344,13 @@ def register():
         nome = request.form.get('nome', '').strip()
         email = request.form.get('email', '').strip().lower()
         senha = request.form.get('senha', '')
-
         if not (nome and email and senha):
             flash("Preencha todos os campos.", "erro")
             return redirect(url_for("register"))
-
+        
         conexao = conectar_banco()
         if not conexao:
-            flash("Erro de conexão com o Banco de Dados. Avise o admin.", "erro")
+            flash("Erro crítico: Banco não conectado (ver logs).", "erro")
             return redirect(url_for("register"))
 
         try:
@@ -408,9 +367,8 @@ def register():
             return redirect(url_for("login"))
         except Exception as e:
             print("Erro ao cadastrar:", e)
-            flash("Erro ao cadastrar usuário.", "erro")
+            flash(f"Erro ao cadastrar usuário: {e}", "erro")
             return redirect(url_for("register"))
-
     return render_template("register.html")
 
 @app.route("/login", methods=["GET", "POST"])
@@ -418,14 +376,13 @@ def login():
     if request.method == "POST":
         email = request.form.get('email', '').strip().lower()
         senha = request.form.get('senha', '')
-
         if not (email and senha):
             flash("Preencha email e senha.", "erro")
             return redirect(url_for("login"))
 
         conexao = conectar_banco()
         if not conexao:
-            flash("Erro de conexão com o Banco de Dados. Avise o admin.", "erro")
+            flash("Erro crítico: Banco não conectado (ver logs).", "erro")
             return redirect(url_for("login"))
 
         try:
@@ -439,7 +396,6 @@ def login():
                 return redirect(url_for("login"))
 
             user_id, user_name, user_hash, tema, resultados_por_pagina, fez_onboarding = user
-
             if not check_password_hash(user_hash, senha):
                 flash("Email ou senha incorretos!", "erro")
                 return redirect(url_for("login"))
@@ -449,17 +405,13 @@ def login():
             session['tema'] = tema or 'claro'
             session['resultados'] = resultados_por_pagina or 12
 
-            if fez_onboarding == 0:
-                return redirect(url_for("onboarding"))
-
+            if fez_onboarding == 0: return redirect(url_for("onboarding"))
             flash(f"Bem-vindo(a), {user_name}!", "sucesso")
             return redirect(url_for("index"))
-
         except Exception as e:
             print("Erro login:", e)
             flash("Erro ao fazer login.", "erro")
             return redirect(url_for("login"))
-
     return render_template("login.html")
 
 @app.route("/logout")
@@ -472,12 +424,10 @@ def logout():
 def onboarding():
     if "user_id" not in session: return redirect(url_for("login"))
     user_id = session["user_id"]
-    
     if request.method == "POST":
         tema = request.form.get("tema", "claro")
         try: resultados = int(request.form.get("resultados", 12))
         except: resultados = 12
-
         conexao = conectar_banco()
         if conexao:
             try:
@@ -497,8 +447,6 @@ def onboarding():
 @app.route("/", methods=["GET", "POST"])
 def index():
     if "user_id" not in session: return redirect(url_for("login"))
-
-    # Checagem rapida de onboarding
     conexao = conectar_banco()
     if conexao:
         try:
@@ -530,7 +478,6 @@ def index():
                 r["sentimento"] = analisar_sentimento(r.get("titulo",""))
                 resultados.append(r)
                 sentimentos[r["sentimento"]] += 1
-            
             if os.getenv('SAVE_TO_DB', '0') == '1':
                 salvar_no_banco(resultados, termo)
 
@@ -553,19 +500,17 @@ def index():
 @app.route('/api/search')
 def api_search():
     termo = (request.args.get('termo') or '').strip()
-    # Logica API igual Index...
-    return jsonify({'termo': termo, 'results': []}) # Simplificado para caber
+    return jsonify({'termo': termo, 'results': []}) # Simplificado
 
 @app.route('/health')
-def health():
-    return 'ok'
+def health(): return 'ok'
 
-# --- ROTA PARA CRIAR O BANCO (Use uma vez e depois apague) ---
+# --- ROTA PARA CRIAR O BANCO (NOVA) ---
 @app.route("/setup_banco")
 def setup_banco():
     conexao = conectar_banco()
     if not conexao:
-        return "❌ ERRO: Não foi possível conectar ao banco. Vá em 'Variables' no Railway e garanta que DB_HOST, DB_USER, DB_PASSWORD estão lá."
+        return "❌ ERRO: Não foi possível conectar ao banco. Verifique as variáveis de ambiente no Railway."
     try:
         with conexao.cursor() as cursor:
             cursor.execute("""
@@ -592,7 +537,7 @@ def setup_banco():
             """)
         conexao.commit()
         conexao.close()
-        return "✅ SUCESSO! As tabelas foram criadas. Pode ir fazer o cadastro em /register."
+        return "✅ SUCESSO! As tabelas 'users' e 'noticias' foram criadas. Agora você pode ir para /register e se cadastrar!"
     except Exception as e:
         return f"Erro ao criar tabelas: {e}"
 
