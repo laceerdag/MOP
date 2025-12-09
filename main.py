@@ -21,8 +21,8 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "troque_essa_chave_em_producao")
 def conectar_banco():
     host = os.getenv('DB_HOST', 'localhost')
     user = os.getenv('DB_USER', 'root')
-    password = os.getenv('DB_PASSWORD', 'ceub123456')
-    db = os.getenv('DB_NAME', 'mop_mvp')
+    password = os.getenv('DB_PASSWORD', 'TLvLZjNyOkcdniOBXDpRjjQXsPuINSYv')
+    db = os.getenv('DB_NAME', 'users')
 
     try:
         conn = pymysql.connect(
@@ -685,3 +685,4 @@ def health():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
