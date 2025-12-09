@@ -27,7 +27,7 @@ def conectar_banco():
     user = os.getenv('DB_USER')
     password = os.getenv('DB_PASSWORD')
     db = os.getenv('DB_NAME')
-    port_str = os.getenv('DB_PORT')
+    port_str = os.getenv('DB_PORT', '3306')
 
     # Conversão segura da porta
     try:
@@ -544,4 +544,5 @@ def setup_banco():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
 
